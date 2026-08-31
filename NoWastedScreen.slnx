@@ -1,0 +1,9 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="NoWastedScreen/NoWastedScreen.csproj" Id="abf19a4d-a4ff-44d1-87f0-982d6637bf1e">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+</Solution>
