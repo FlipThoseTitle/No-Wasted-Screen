@@ -7,6 +7,16 @@ No Wasted Screen is a mod that removes the original Wasted Screen for GTA V, and
 3. Inside your GTA Directory, create a folder called `scripts`
 4. Put `NoWastedScreen.dll` into `scripts` folder
 
+# Building the Project
+**ignore this if you're not trying to modify the script.**
+
+1. Press the green code button and Download ZIP
+2. Extract ZIP
+3. Open `NoWastedScreen.slnx` with [Visual Studio](https://visualstudio.microsoft.com/)
+4. Add `ScriptHookVDotNet3.dll` into the references, browse from your GTA directory
+5. Make sure active solution platform is x64, if there isn't, create new one with `<New...>` in the Configuration Manager, make sure to tick create new project platforms
+6. Build Solution, the `NoWastedScreen.dll` should be in your project folder inside `bins` folder.
+
 # Change log
 - v1.0
   - Initial release
