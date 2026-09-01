@@ -17,7 +17,8 @@ namespace NoWastedScreen
             Normal,
             Dead,
             FadingOut,
-            FadingIn
+            FadingIn,
+            AwaitingVanillaRespawn
         }
 
         private const string LogTag = "[NoWastedScreen] ";
@@ -31,6 +32,10 @@ namespace NoWastedScreen
         // Safety net so a weird ragdoll/death animation can't trap the player in the Dead state forever.
         private const int MaximumDeathWaitMs = 10000;
 
+        // Safety net for the SpawnAtHospital path if the vanilla respawn hasn't brought the ped back alive within this long
+        // (counted from the moment of death), something's gone wrong and we step in ourselves.
+        private const int MaximumVanillaRespawnWaitMs = 20000;
+
         private DeathState state = DeathState.Normal;
 
         private readonly Stopwatch deathTimer = new Stopwatch();
@@ -42,12 +47,17 @@ namespace NoWastedScreen
         private bool fadeOutStarted;
         private bool respawnApplied;
 
+        // From NoWastedScreen.ini: true respawns at the nearest hospital via the vanilla system, false resurrects the ped exactly where they died.
+        private readonly bool spawnAtHospital;
+
         public NoWastedScreen()
         {
             Interval = 0;
 
             Tick += OnTick;
             Aborted += OnAborted;
+
+            spawnAtHospital = Settings.GetValue("Settings", "SpawnAtHospital", true);
 
             // Stop the vanilla death system from fading and restarting on its own, everything past this point is handled by hand.
             Function.Call(Hash.SET_FADE_OUT_AFTER_DEATH, false);
@@ -75,6 +85,9 @@ namespace NoWastedScreen
                         break;
                     case DeathState.FadingIn:
                         UpdateFadingIn(ped);
+                        break;
+                    case DeathState.AwaitingVanillaRespawn:
+                        UpdateAwaitingVanillaRespawn(ped);
                         break;
                 }
             }
@@ -105,7 +118,8 @@ namespace NoWastedScreen
             fadeOutStarted = false;
             respawnApplied = false;
 
-            // Grab the death spot before anything else touches the ped.
+            // Grab the death spot before anything else touches the ped - kept
+            // around as an emergency fallback even on the SpawnAtHospital path.
             deathPosition = ped.Position;
             deathHeading = ped.Heading;
 
@@ -160,7 +174,10 @@ namespace NoWastedScreen
             if (!Screen.IsFadedOut)
                 return;
 
-            ApplyRespawn(ped);
+            if (spawnAtHospital)
+                ReleaseToVanillaRespawn();
+            else
+                ApplyRespawn(ped);
         }
 
         private void ApplyRespawn(Ped ped)
@@ -192,6 +209,36 @@ namespace NoWastedScreen
             Function.Call(Hash.FORCE_GAME_STATE_PLAYING);
 
             state = DeathState.FadingIn;
+        }
+
+        private void ReleaseToVanillaRespawn()
+        {
+            if (respawnApplied)
+                return;
+
+            respawnApplied = true;
+
+            // takes it from here and sends the ped to the nearest hospital
+            Function.Call(Hash.SET_FADE_OUT_AFTER_DEATH, true);
+            Function.Call(Hash.SET_FADE_IN_AFTER_DEATH_ARREST, true);
+            Function.Call(Hash.IGNORE_NEXT_RESTART, false);
+            Function.Call(Hash.PAUSE_DEATH_ARREST_RESTART, false);
+
+            state = DeathState.AwaitingVanillaRespawn;
+        }
+
+        private void UpdateAwaitingVanillaRespawn(Ped ped)
+        {
+            // respawn_controller owns the teleport and the fade back in
+            if (ped.IsDead)
+            {
+                if (deathTimer.ElapsedMilliseconds >= MaximumVanillaRespawnWaitMs)
+                    EmergencyRecovery();
+
+                return;
+            }
+
+            FinishDeathCycle();
         }
 
         private void UpdateFadingIn(Ped ped)
