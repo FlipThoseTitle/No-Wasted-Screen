@@ -193,6 +193,10 @@ namespace NoWastedScreen
             // note: NETWORK_RESURRECT_LOCAL_PLAYER is an Online only native and doesnt apply here.
             ped.Resurrect();
 
+            // Dying inside a vehicle can leave collision disabled on the ped even after Resurrect()
+            // without this the ped clips straight through the map
+            Function.Call(Hash.SET_ENTITY_COLLISION, ped, true, false);
+
             Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, ped,
                 deathPosition.X, deathPosition.Y, deathPosition.Z + 0.15f,
                 false, false, false);
@@ -305,6 +309,9 @@ namespace NoWastedScreen
                     if (ped.IsDead)
                     {
                         ped.Resurrect();
+
+                        // same vehicle death collision fix as ApplyRespawn
+                        Function.Call(Hash.SET_ENTITY_COLLISION, ped, true, false);
 
                         Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, ped,
                             deathPosition.X, deathPosition.Y, deathPosition.Z + 0.15f,
