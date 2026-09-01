@@ -35,6 +35,7 @@ namespace NoWastedScreen
         // Safety net for the SpawnAtHospital path if the vanilla respawn hasn't brought the ped back alive within this long
         // (counted from the moment of death), something's gone wrong and we step in ourselves.
         private const int MaximumVanillaRespawnWaitMs = 20000;
+        private int savedRespawnControllerGlobal;
 
         private DeathState state = DeathState.Normal;
 
@@ -46,6 +47,7 @@ namespace NoWastedScreen
 
         private bool fadeOutStarted;
         private bool respawnApplied;
+        private bool respawnControllerGlobalSuppressed;
 
         // From NoWastedScreen.ini: true respawns at the nearest hospital via the vanilla system, false resurrects the ped exactly where they died.
         private readonly bool spawnAtHospital;
@@ -110,8 +112,6 @@ namespace NoWastedScreen
 
         private void BeginDeath(Ped ped)
         {
-            state = DeathState.Dead;
-
             deathTimer.Restart();
             stillTimer.Reset();
 
@@ -126,6 +126,15 @@ namespace NoWastedScreen
             // Not invincibility, the ped is left genuinely dead so the ragdoll plays out on its own.
             // Player control isn't touched either, since GTA has already taken it away by this point.
             Game.Player.IsInvincible = false;
+
+            // mission own restart logic notices the death and starts running immediately
+            if (IsMissionActive())
+            {
+                ReleaseToVanillaRespawn();
+                return;
+            }
+
+            state = DeathState.Dead;
 
             SuppressVanillaRespawnController();
         }
@@ -174,7 +183,10 @@ namespace NoWastedScreen
             if (!Screen.IsFadedOut)
                 return;
 
-            if (spawnAtHospital)
+            // missions run their own checkpoint logic.
+            // resurrecting in place (SpawnAtHospital=false) would leave the ped sitting at the death spot for a bit before the mission's own restart repositions it
+            // so we let the mission handle it instead, to prevent mission fail trigger from leaving the intended area
+            if (spawnAtHospital || IsMissionActive())
                 ReleaseToVanillaRespawn();
             else
                 ApplyRespawn(ped);
@@ -222,7 +234,12 @@ namespace NoWastedScreen
 
             respawnApplied = true;
 
-            // takes it from here and sends the ped to the nearest hospital
+            // Must happen before respawn_controller relaunches, or it reads our suppression value
+            // and bails out of the entry logic the mission checkpoint restart relies on.
+            RestoreVanillaRespawnController();
+
+            // takes it from here and sends ped to nearest hospital,
+            // or if a mission is active hten lets the mission own checkpoint restart everything.
             Function.Call(Hash.SET_FADE_OUT_AFTER_DEATH, true);
             Function.Call(Hash.SET_FADE_IN_AFTER_DEATH_ARREST, true);
             Function.Call(Hash.IGNORE_NEXT_RESTART, false);
@@ -286,6 +303,10 @@ namespace NoWastedScreen
             deathPosition = Vector3.Zero;
             deathHeading = 0.0f;
 
+            // Safety net: ApplyRespawn (resurrect in place) never goes through ReleaseToVanillaRespawn,
+            // so without this Global 5 would stay stuck on our suppression value for the rest of the session.
+            RestoreVanillaRespawnController();
+
             // Release the pause now that our sequence is done
             // otherwise a later natural death/arrest would stay stuck for the rest of the session.
             Function.Call(Hash.PAUSE_DEATH_ARREST_RESTART, false);
@@ -325,6 +346,10 @@ namespace NoWastedScreen
                     Game.Player.IsInvincible = false;
                 }
 
+                // whatever state we were in when this fired may have left global 5 on our suppression value
+                // put it back too, same reasoning as FinishDeathCycle.
+                RestoreVanillaRespawnController();
+
                 Function.Call(Hash.PAUSE_DEATH_ARREST_RESTART, false);
                 Function.Call(Hash.SET_FADE_OUT_AFTER_DEATH, false);
 
@@ -349,6 +374,10 @@ namespace NoWastedScreen
         {
             try
             {
+                // If the script is unloaded mid suppression, put global 5 back too
+                // once this instance is gone, nothing else will ever undo it for the rest of the session.
+                RestoreVanillaRespawnController();
+
                 // Hand everything back to the game as if this script had never been loaded.
                 Function.Call(Hash.PAUSE_DEATH_ARREST_RESTART, false);
                 Function.Call(Hash.IGNORE_NEXT_RESTART, false);
@@ -374,8 +403,16 @@ namespace NoWastedScreen
 
         // Keeps the vanilla respawn_controller thread from taking the death over for as long as our own sequence is running.
         // This is called every tick rather than once, because killing the thread a single time isn't enough to stop the game's scheduler from relaunching it mid-sequence.
-        private static void SuppressVanillaRespawnController()
+        private void SuppressVanillaRespawnController()
         {
+            // Snapshot Global 5 the first time we touch it this cycle, so RestoreVanillaRespawnController()
+            // can put back whatever the game itself had there instead of assuming a fixed default.
+            if (!respawnControllerGlobalSuppressed)
+            {
+                savedRespawnControllerGlobal = GlobalVariable.Get(5).Read<int>();
+                respawnControllerGlobalSuppressed = true;
+            }
+
             Function.Call(Hash.FORCE_CLEANUP_FOR_ALL_THREADS_WITH_THIS_NAME, "respawn_controller", 3);
             Function.Call(Hash.TERMINATE_ALL_SCRIPTS_WITH_THIS_NAME, "respawn_controller");
 
@@ -390,6 +427,25 @@ namespace NoWastedScreen
             Function.Call(Hash.SET_TIME_SCALE, 1.0f);
             Function.Call(Hash.SET_FADE_OUT_AFTER_DEATH, false);
             Function.Call(Hash.SET_FADE_IN_AFTER_DEATH_ARREST, false);
+        }
+
+        // Puts Global 5 back to whatever it held before this cycle started overwriting it every tick.
+        // Must run before respawn_controller is allowed to relaunch, i.e. before/at the same moment IGNORE_NEXT_RESTART is cleared
+        // otherwise the fresh instance reads our bail out value on its own entry logic and skips the fading before a mission checkpoint restart
+        private void RestoreVanillaRespawnController()
+        {
+            if (!respawnControllerGlobalSuppressed)
+                return;
+
+            GlobalVariable.Get(5).Write(savedRespawnControllerGlobal);
+            respawnControllerGlobalSuppressed = false;
+        }
+
+        // GET_MISSION_FLAG mirrors the flag mission scripts flip with
+        // SET_MISSION_FLAG(TRUE/FALSE) at their own start/end
+        private static bool IsMissionActive()
+        {
+            return Function.Call<bool>(Hash.GET_MISSION_FLAG);
         }
     }
 }
