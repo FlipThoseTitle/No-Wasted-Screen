@@ -22,6 +22,10 @@ No Wasted Screen is a mod that removes the original Wasted Screen for GTA V, and
   - Initial release
 - v1.1
   - Added Configuration .ini file as an optional setting for Spawning at hospital instead of resurrecting on the spot
+- v1.2
+  - Fixed the issues where the player's character doesn't have collision after respawning, if they died inside a vehicle.
+- v1.3
+  - Fixed the compatibility with mission's death. For now, the script is disabled if player is in a mission.
  
 # Credits
 This mod functionality is originally based off [Marhex's Prison Mod](https://github.com/marhex/prison-mod), and [F121's MPWasted For SP mod](https://github.com/F121Live/MPWasted-For-SP)
